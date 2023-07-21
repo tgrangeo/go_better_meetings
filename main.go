@@ -59,6 +59,50 @@ func HandleEventMessage(event slackevents.EventsAPIEvent, client *slack.Client) 
 	return nil
 }
 
+func handleCreateMeeting(cmd slack.SlashCommand, client *slack.Client) error {
+	attachment := slack.Attachment{
+		Text:       "Please enter a name for the meeting:",
+		CallbackID: "meeting_name",
+		Actions: []slack.AttachmentAction{
+			//probleme is here ***************************************************************************************************************************************************************************************************
+			slack.AttachmentAction{
+				Name: "meeting_name",
+				Type: "input",
+				Options: []slack.AttachmentActionOption{
+					slack.AttachmentActionOption{
+						Text:  "Meeting 1",
+						Value: "Meeting 1",
+					},
+					slack.AttachmentActionOption{
+						Text:  "Meeting 2",
+						Value: "Meeting 2",
+					},
+				},
+			},
+		},
+	}
+
+	_, _, err := client.PostMessage(cmd.ChannelID, slack.MsgOptionAttachments(attachment))
+	if err != nil {
+		log.Printf("Failed to send the interactive message: %v", err)
+	}
+	return nil
+}
+
+func handleInteractiveCallback(callback slack.InteractionCallback, client *slack.Client) {
+	if callback.CallbackID == "meeting_name" {
+		fmt.Println("******************************************************************************************************")
+		selectedValue := callback.ActionCallback.BlockActions[0].SelectedOption.Value
+		responseMessage := fmt.Sprintf("You selected: %s", selectedValue)
+		_, _, err := client.PostMessage(callback.Channel.ID, slack.MsgOptionText(responseMessage, false))
+		if err != nil {
+			log.Printf("Failed to send the response message: %v", err)
+		}
+	} else {
+		log.Printf("Unknown callback ID: %s", callback.CallbackID)
+	}
+}
+
 func main() {
 
 	godotenv.Load(".env")
@@ -85,11 +129,27 @@ func main() {
 				log.Println("Shutting down socketmode listener")
 				return
 			case event := <-socketClient.Events:
-
 				switch event.Type {
+				case socketmode.RequestTypeSlashCommands:
+					cmd, ok := event.Data.(slack.SlashCommand)
+					if !ok {
+						log.Printf("Could not type cast the event to the SlashCommand: %v\n", event)
+						continue
+					}
+					log.Printf("Received slash command: %s, arguments: %s\n", cmd.Command, cmd.Text)
 
+					handleCreateMeeting(cmd, client)
+
+					socketClient.Ack(*event.Request)
+				case socketmode.EventTypeInteractive:
+					callback, ok := event.Data.(slack.InteractionCallback)
+					if !ok {
+						log.Printf("Could not type cast the event to the InteractionCallback: %v\n", event)
+						continue
+					}
+					handleInteractiveCallback(callback, client)
+					socketClient.Ack(*event.Request)
 				case socketmode.EventTypeEventsAPI:
-
 					eventsAPI, ok := event.Data.(slackevents.EventsAPIEvent)
 					if !ok {
 						log.Printf("Could not type cast the event to the EventsAPI: %v\n", event)
